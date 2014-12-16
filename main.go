@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 )
 
 var (
@@ -71,8 +72,19 @@ func getAncestry(id image) []image {
 	return ancestry
 }
 
+func fqTag(name string, t tag) tag {
+	canonicalName := strings.TrimPrefix(name, "library/")
+	return tag(canonicalName + ":" + string(t))
+}
+
 func main() {
-	fmt.Printf("Repos: %v\n", getRepos())
-	fmt.Printf("Tags for ssp: %v\n", getTags("library/ssp"))
-	fmt.Printf("Ancestry for 08d821bf14f3e6aa1b8bf86c6d3d9878c92e9aab95120a68664db20b9fcc2100: %v\n", getAncestry("08d821bf14f3e6aa1b8bf86c6d3d9878c92e9aab95120a68664db20b9fcc2100"))
+	tagsByImage := make(map[image][]tag)
+	for _, repo := range getRepos().Results {
+		name := repo.Name
+		for t, id := range getTags(name) {
+			tags, _ := tagsByImage[id]
+			tagsByImage[id] = append(tags, fqTag(name, t))
+		}
+	}
+	fmt.Printf("%v\n", tagsByImage)
 }
