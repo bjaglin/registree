@@ -49,6 +49,7 @@ func doGet(path string) []byte {
 	if err != nil {
 		panic(err.Error())
 	}
+	res.Body.Close()
 	return body
 }
 
