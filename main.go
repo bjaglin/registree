@@ -42,6 +42,9 @@ func doGet(path string) []byte {
 	if err != nil {
 		panic(err.Error())
 	}
+	if res.StatusCode != 200 {
+		return []byte{}
+	}
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		panic(err.Error())
