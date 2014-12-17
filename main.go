@@ -71,10 +71,17 @@ func getRepos() repos {
 
 func getTags(name string) map[tag]image {
 	log.Printf("Fetching tags for %s ...", name)
-	var tags tags
-	json.Unmarshal(doGet("repositories/"+name+"/tags"), &tags)
-	log.Printf("%v tags fetched for repo %s", len(tags), name)
-	return tags
+	var (
+		rawTags tags
+		fqTags  tags
+	)
+	json.Unmarshal(doGet("repositories/"+name+"/tags"), &rawTags)
+	log.Printf("%v tags fetched for repo %s", len(rawTags), name)
+	fqTags = make(map[tag]image)
+	for tag, id := range rawTags {
+		fqTags[fqTag(name, tag)] = id
+	}
+	return fqTags
 }
 
 func getAncestry(id image) []image {
@@ -93,7 +100,7 @@ func fqTag(name string, t tag) tag {
 func printTree(root *imageNode, level int) {
 	if len(root.tags) > 0 || len(root.children) > 1 {
 		fmt.Printf("%s%v\n", strings.Repeat(" ", level), root.tags)
-		level = level +1
+		level = level + 1
 	}
 	for _, child := range root.children {
 		printTree(child, level)
@@ -102,7 +109,10 @@ func printTree(root *imageNode, level int) {
 
 func main() {
 	var (
+		remaining   int
+		tagsCh      = make(chan tags)
 		tagsByImage = make(map[image][]tag)
+		ancestryCh  = make(chan []image)
 		images      = make(map[image]*imageNode)
 		roots       []*imageNode
 	)
@@ -117,17 +127,32 @@ func main() {
 	} else {
 		log.SetOutput(ioutil.Discard)
 	}
+	// get tags in parallel
 	for _, repo := range getRepos().Results {
-		name := repo.Name
-		for t, id := range getTags(name) {
-			tags, _ := tagsByImage[id]
-			tagsByImage[id] = append(tags, fqTag(name, t))
-		}
+		remaining = remaining + 1
+		go func(name string) { tagsCh <- getTags(name) }(repo.Name)
 	}
+	// group them as they are fetched
+	for remaining != 0 {
+		for tag, id := range <-tagsCh {
+			tags, _ := tagsByImage[id]
+			tagsByImage[id] = append(tags, tag)
+		}
+		remaining = remaining - 1
+	}
+	// get ancestries in parallel
 	for imageId := range tagsByImage {
-		var previousNode *imageNode
-		for _, ancestryId := range getAncestry(imageId) {
-			if node, ok := images[ancestryId]; ok {
+		remaining = remaining + 1
+		go func(id image) { ancestryCh <- getAncestry(id) }(imageId)
+	}
+	// process them as they arrive
+	for remaining != 0 {
+		var (
+			ancestry     = <-ancestryCh
+			previousNode *imageNode
+		)
+		for _, id := range ancestry {
+			if node, ok := images[id]; ok {
 				if previousNode != nil {
 					node.children = append(node.children, previousNode)
 				}
@@ -135,19 +160,21 @@ func main() {
 				break
 			}
 			node := &imageNode{}
-			if tags, ok := tagsByImage[ancestryId]; ok {
+			if tags, ok := tagsByImage[id]; ok {
 				node.tags = tags
 			}
 			if previousNode != nil {
 				node.children = []*imageNode{previousNode}
 			}
-			images[ancestryId] = node
+			images[id] = node
 			previousNode = node
 		}
 		if previousNode != nil {
 			roots = append(roots, previousNode)
 		}
+		remaining = remaining - 1
 	}
+	// dump all the trees
 	for _, root := range roots {
 		printTree(root, 0)
 	}
