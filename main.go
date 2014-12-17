@@ -31,6 +31,11 @@ type image string
 
 type tags map[tag]image
 
+type imageNode struct {
+	tags     []tag
+	children []*imageNode
+}
+
 func init() {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -77,8 +82,22 @@ func fqTag(name string, t tag) tag {
 	return tag(canonicalName + ":" + string(t))
 }
 
+func printTree(root *imageNode, level int) {
+	if len(root.tags) > 0 || len(root.children) > 0 {
+		fmt.Printf("%s%v\n", strings.Repeat(" ", level), root.tags)
+		level = level +1
+	}
+	for _, child := range root.children {
+		printTree(child, level)
+	}
+}
+
 func main() {
-	tagsByImage := make(map[image][]tag)
+	var (
+		tagsByImage = make(map[image][]tag)
+		images      = make(map[image]*imageNode)
+		roots       []*imageNode
+	)
 	for _, repo := range getRepos().Results {
 		name := repo.Name
 		for t, id := range getTags(name) {
@@ -86,5 +105,35 @@ func main() {
 			tagsByImage[id] = append(tags, fqTag(name, t))
 		}
 	}
-	fmt.Printf("%v\n", tagsByImage)
+	for imageId := range tagsByImage {
+		var (
+			root         *imageNode
+			previousNode *imageNode
+		)
+		for _, ancestryId := range getAncestry(imageId) {
+			if node, ok := images[ancestryId]; ok {
+				if previousNode != nil {
+					node.children = append(node.children, previousNode)
+				}
+				root = node
+				break
+			}
+			node := &imageNode{}
+			if tags, ok := tagsByImage[ancestryId]; ok {
+				node.tags = tags
+			}
+			if previousNode != nil {
+				node.children = []*imageNode{previousNode}
+			}
+			images[ancestryId] = node
+			previousNode = node
+		}
+		if root != nil {
+			roots = append(roots, root)
+		}
+	}
+	for _, root := range roots {
+		printTree(root, 0)
+	}
+
 }
