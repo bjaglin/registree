@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -98,6 +100,12 @@ func main() {
 		images      = make(map[image]*imageNode)
 		roots       []*imageNode
 	)
+	if len(registryURL) == 0 {
+		registryURL = os.Getenv("REGISTRY_URL")
+	}
+	if len(registryURL) == 0 {
+		log.Fatal("No registry URL provided, use the environment variable REGISTRY_URL to set it")
+	}
 	for _, repo := range getRepos().Results {
 		name := repo.Name
 		for t, id := range getTags(name) {
@@ -106,16 +114,13 @@ func main() {
 		}
 	}
 	for imageId := range tagsByImage {
-		var (
-			root         *imageNode
-			previousNode *imageNode
-		)
+		var previousNode *imageNode
 		for _, ancestryId := range getAncestry(imageId) {
 			if node, ok := images[ancestryId]; ok {
 				if previousNode != nil {
 					node.children = append(node.children, previousNode)
 				}
-				root = node
+				previousNode = nil
 				break
 			}
 			node := &imageNode{}
@@ -128,8 +133,8 @@ func main() {
 			images[ancestryId] = node
 			previousNode = node
 		}
-		if root != nil {
-			roots = append(roots, root)
+		if previousNode != nil {
+			roots = append(roots, previousNode)
 		}
 	}
 	for _, root := range roots {
