@@ -62,20 +62,26 @@ func doGet(path string) []byte {
 }
 
 func getRepos() repos {
+	log.Print("Fetching repos...")
 	var repos repos
 	json.Unmarshal(doGet("search"), &repos)
+	log.Printf("%v repo(s) fetched", repos.NumResults)
 	return repos
 }
 
 func getTags(name string) map[tag]image {
+	log.Printf("Fetching tags for %s ...", name)
 	var tags tags
 	json.Unmarshal(doGet("repositories/"+name+"/tags"), &tags)
+	log.Printf("%v tags fetched for repo %s", len(tags), name)
 	return tags
 }
 
 func getAncestry(id image) []image {
+	log.Printf("Fetching ancestry for %s ...", id)
 	var ancestry []image
 	json.Unmarshal(doGet("images/"+string(id)+"/ancestry"), &ancestry)
+	log.Printf("%v ancestors fetched for repo %s", len(ancestry), id)
 	return ancestry
 }
 
@@ -105,6 +111,11 @@ func main() {
 	}
 	if len(registryURL) == 0 {
 		log.Fatal("No registry URL provided, use the environment variable REGISTRY_URL to set it")
+	}
+	if len(os.Getenv("REGISTREE_DEBUG")) > 0 {
+		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(ioutil.Discard)
 	}
 	for _, repo := range getRepos().Results {
 		name := repo.Name
