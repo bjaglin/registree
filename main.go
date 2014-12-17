@@ -85,7 +85,7 @@ func fqTag(name string, t tag) tag {
 }
 
 func printTree(root *imageNode, level int) {
-	if len(root.tags) > 0 || len(root.children) > 0 {
+	if len(root.tags) > 0 || len(root.children) > 1 {
 		fmt.Printf("%s%v\n", strings.Repeat(" ", level), root.tags)
 		level = level +1
 	}
