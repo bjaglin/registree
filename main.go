@@ -34,6 +34,7 @@ type image string
 type tags map[tag]image
 
 type imageNode struct {
+	id       image
 	tags     []tag
 	children []*imageNode
 }
@@ -99,7 +100,7 @@ func fqTag(name string, t tag) tag {
 
 func printTree(root *imageNode, level int) {
 	if len(root.tags) > 0 || len(root.children) > 1 {
-		fmt.Printf("%s%v\n", strings.Repeat(" ", level), root.tags)
+		fmt.Printf("%s %s%v\n", root.id, strings.Repeat(" ", level), root.tags)
 		level = level + 1
 	}
 	for _, child := range root.children {
@@ -109,12 +110,12 @@ func printTree(root *imageNode, level int) {
 
 func main() {
 	var (
-		remaining   int
-		tagsCh      = make(chan tags)
-		tagsByImage = make(map[image][]tag)
-		ancestryCh  = make(chan []image)
-		images      = make(map[image]*imageNode)
-		roots       []*imageNode
+		remaining   int                          // how many more responses are we waiting from the goroutine?
+		tagsCh      = make(chan tags)            // tags fetcher/consumer channel
+		tagsByImage = make(map[image][]tag)      // image ids grouped by tags
+		ancestryCh  = make(chan []image)         // ancestries fetcher/consumer channel
+		images      = make(map[image]*imageNode) // already processed nodes as we are building up the trees
+		roots       []*imageNode                 // roots as we are building up the threes
 	)
 	if len(registryURL) == 0 {
 		registryURL = os.Getenv("REGISTRY_URL")
@@ -152,24 +153,28 @@ func main() {
 		)
 		for _, id := range ancestry {
 			if node, ok := images[id]; ok {
+				// we already went up the hierarchy from there, just append a new child
 				if previousNode != nil {
 					node.children = append(node.children, previousNode)
 				}
 				previousNode = nil
 				break
 			}
-			node := &imageNode{}
+			node := &imageNode{id: id}
 			if tags, ok := tagsByImage[id]; ok {
 				node.tags = tags
+				// don't wait for that image's ancestry, we already are going up that one
 				delete(tagsByImage, id)
 			}
 			if previousNode != nil {
+				// this is not a leaf in the tree, so attach its child
 				node.children = []*imageNode{previousNode}
 			}
 			images[id] = node
 			previousNode = node
 		}
 		if previousNode != nil {
+			// the previous loop didn't break out, so the last node considered is a root
 			roots = append(roots, previousNode)
 		}
 	}
