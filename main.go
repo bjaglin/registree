@@ -142,11 +142,10 @@ func main() {
 	}
 	// get ancestries in parallel
 	for imageId := range tagsByImage {
-		remaining = remaining + 1
 		go func(id image) { ancestryCh <- getAncestry(id) }(imageId)
 	}
-	// process them as they arrive
-	for remaining != 0 {
+	// process them as they arrive until all tagged images have been used
+	for len(tagsByImage) != 0 {
 		var (
 			ancestry     = <-ancestryCh
 			previousNode *imageNode
@@ -162,6 +161,7 @@ func main() {
 			node := &imageNode{}
 			if tags, ok := tagsByImage[id]; ok {
 				node.tags = tags
+				delete(tagsByImage, id)
 			}
 			if previousNode != nil {
 				node.children = []*imageNode{previousNode}
@@ -172,7 +172,6 @@ func main() {
 		if previousNode != nil {
 			roots = append(roots, previousNode)
 		}
-		remaining = remaining - 1
 	}
 	// dump all the trees
 	for _, root := range roots {
