@@ -112,10 +112,6 @@ func main() {
 	var (
 		remaining   int                          // how many more responses are we waiting from the goroutine?
 		tagsCh      = make(chan tags)            // tags fetcher/consumer channel
-		tagsByImage = make(map[image][]tag)      // image ids grouped by tags
-		ancestryCh  = make(chan []image)         // ancestries fetcher/consumer channel
-		images      = make(map[image]*imageNode) // already processed nodes as we are building up the trees
-		roots       []*imageNode                 // roots as we are building up the threes
 	)
 	if len(registryURL) == 0 {
 		registryURL = os.Getenv("REGISTRY_URL")
@@ -135,52 +131,14 @@ func main() {
 	}
 	// group them as they are fetched
 	for remaining != 0 {
-		for tag, id := range <-tagsCh {
-			tags, _ := tagsByImage[id]
-			tagsByImage[id] = append(tags, tag)
+		for fqTag, _ := range <-tagsCh {
+			repo := strings.Split(string(fqTag), ":")[0]
+			tag := strings.Split(string(fqTag), ":")[1]
+			if (len(tag) == 40 && !strings.HasPrefix(tag, "jenkins")) {
+				fmt.Printf("%s:%s\n", repo, tag)
+			}
 		}
 		remaining = remaining - 1
-	}
-	// get ancestries in parallel
-	for imageId := range tagsByImage {
-		go func(id image) { ancestryCh <- getAncestry(id) }(imageId)
-	}
-	// process them as they arrive until all tagged images have been used
-	for len(tagsByImage) != 0 {
-		var (
-			ancestry     = <-ancestryCh
-			previousNode *imageNode
-		)
-		for _, id := range ancestry {
-			if node, ok := images[id]; ok {
-				// we already went up the hierarchy from there, just append a new child
-				if previousNode != nil {
-					node.children = append(node.children, previousNode)
-				}
-				previousNode = nil
-				break
-			}
-			node := &imageNode{id: id}
-			if tags, ok := tagsByImage[id]; ok {
-				node.tags = tags
-				// don't wait for that image's ancestry, we already are going up that one
-				delete(tagsByImage, id)
-			}
-			if previousNode != nil {
-				// this is not a leaf in the tree, so attach its child
-				node.children = []*imageNode{previousNode}
-			}
-			images[id] = node
-			previousNode = node
-		}
-		if previousNode != nil {
-			// the previous loop didn't break out, so the last node considered is a root
-			roots = append(roots, previousNode)
-		}
-	}
-	// dump all the trees
-	for _, root := range roots {
-		printTree(root, 0)
 	}
 
 }
