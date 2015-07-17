@@ -19,9 +19,9 @@ Note that the tool is only compatible with the Registry API v1.
 
 ## Output
 
-Each line represents an layer: the fixed-length prefix is the layer id, followed by some spacing allowing to distinguish siblings from ancestors (roots are only only separated by a single space), and the potential tag(s) of that layer. Only layers that either have a tag or more than one child are represented, so that the trees appear less deep than they actually are, while still displaying relations between them. Note that base layers such as OS images that are available from the central registry will not show up in the output unless they have been explicitly tagged within the target registry.
+Each line represents a layer: the fixed-length prefix is the layer id, followed by some spacing allowing to distinguish siblings from ancestors (roots are only only separated by a single space), and the potential tag(s) of that layer. Only layers that have either a tag or more than one child are listed, so that the trees appear less deep than they actually are, while still displaying relations between them. Note that base layers such as OS images that are available from the central registry will not show up in the output unless they have been explicitly tagged within the target registry.
 
-From the following example, we can learn for instance that `oraclejre:1.8.0_11` is an ancestor of `selenium:2.42.2` and that no layer between them was tagged, that `0c9f511ac247` was tagged twice, and that `sbtdist-runner:java1.8.0_11` and `sbtnative-runner:java1.8.0_11` share a common ancestor layer which is not tagged in that registry.
+From the following example, we can tell for instance that `oraclejre:1.8.0_11` is an ancestor of `selenium:2.42.2` and that no layer between them was tagged, that `0c9f511ac247` was tagged twice, and that `sbtdist-runner:java1.8.0_11` and `sbtnative-runner:java1.8.0_11` share a common ancestor layer which is not tagged in that registry.
 
     05489018501eba827a37365bdd74c687b6760846f51a5943f30e5cd4e0b6b6f2 [oraclejre:1.8.0_11]
     bafa304de54d84d0feb0d44401d6fb14cf7b710a2068b697ce9dd5b9e520f90f   [selenium:2.42.2]
