@@ -1,101 +1,58 @@
 package main
 
 import (
-	"crypto/tls"
-	"encoding/json"
 	"fmt"
+	"github.com/CenturyLinkLabs/docker-reg-client/registry"
 	"io/ioutil"
 	"log"
-	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
 
 var (
-	client      *http.Client
+	client      *registry.Client
 	registryURL string
 )
 
-type repos struct {
-	Query      string `json:"query"`
-	NumResults int    `json:"num_results"`
-	Results    []repo `json:"results"`
-}
-
-type repo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type tag string
-
-type image string
-
-type tags map[tag]image
-
 type imageNode struct {
-	id       image
-	tags     []tag
+	id       string
+	tags     []string
 	children []*imageNode
 }
 
 func init() {
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client = &http.Client{Transport: transport}
+	client = registry.NewClient()
 }
 
-func doGet(path string) []byte {
-	res, err := client.Get(registryURL + "/v1/" + path)
-	if err != nil {
-		panic(err.Error())
-	}
-	if res.StatusCode != 200 {
-		return []byte{}
-	}
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		panic(err.Error())
-	}
-	res.Body.Close()
-	return body
-}
-
-func getRepos() repos {
+func getRepos() *registry.SearchResults {
 	log.Print("Fetching repos...")
-	var repos repos
-	json.Unmarshal(doGet("search"), &repos)
-	log.Printf("%v repo(s) fetched", repos.NumResults)
-	return repos
+	results, _ := client.Search.Query("", 0, 0)
+	log.Printf("%v repo(s) fetched", results.NumResults)
+	return results
 }
 
-func getTags(name string) map[tag]image {
+func getTags(name string) registry.TagMap {
 	log.Printf("Fetching tags for %s ...", name)
-	var (
-		rawTags tags
-		fqTags  tags
-	)
-	json.Unmarshal(doGet("repositories/"+name+"/tags"), &rawTags)
-	log.Printf("%v tags fetched for repo %s", len(rawTags), name)
-	fqTags = make(map[tag]image)
-	for tag, id := range rawTags {
+	tags, _ := client.Repository.ListTags(name, registry.NilAuth{})
+	log.Printf("%v tags fetched for repo %s", len(tags), name)
+	fqTags := make(registry.TagMap)
+	for tag, id := range tags {
 		fqTags[fqTag(name, tag)] = id
 	}
 	return fqTags
 }
 
-func getAncestry(id image) []image {
+func getAncestry(id string) []string {
 	log.Printf("Fetching ancestry for %s ...", id)
-	var ancestry []image
-	json.Unmarshal(doGet("images/"+string(id)+"/ancestry"), &ancestry)
+	ancestry, _ := client.Image.GetAncestry(id, registry.NilAuth{})
 	log.Printf("%v ancestors fetched for repo %s", len(ancestry), id)
 	return ancestry
 }
 
-func fqTag(name string, t tag) tag {
+func fqTag(name string, t string) string {
 	canonicalName := strings.TrimPrefix(name, "library/")
-	return tag(canonicalName + ":" + string(t))
+	return canonicalName + ":" + t
 }
 
 func printTree(root *imageNode, level int) {
@@ -110,12 +67,12 @@ func printTree(root *imageNode, level int) {
 
 func main() {
 	var (
-		remaining   int                          // how many more responses are we waiting from the goroutine?
-		tagsCh      = make(chan tags)            // tags fetcher/consumer channel
-		tagsByImage = make(map[image][]tag)      // image ids grouped by tags
-		ancestryCh  = make(chan []image)         // ancestries fetcher/consumer channel
-		images      = make(map[image]*imageNode) // already processed nodes as we are building up the trees
-		roots       []*imageNode                 // roots as we are building up the threes
+		remaining   int                           // how many more responses are we waiting from the goroutine?
+		tagsCh      = make(chan registry.TagMap)  // tags fetcher/consumer channel
+		tagsByImage = make(map[string][]string)   // image ids grouped by tags
+		ancestryCh  = make(chan []string)         // ancestries fetcher/consumer channel
+		images      = make(map[string]*imageNode) // already processed nodes as we are building up the trees
+		roots       []*imageNode                  // roots as we are building up the threes
 	)
 	if len(registryURL) == 0 {
 		registryURL = os.Getenv("REGISTRY_URL")
@@ -128,6 +85,7 @@ func main() {
 	} else {
 		log.SetOutput(ioutil.Discard)
 	}
+	client.BaseURL, _ = url.Parse(registryURL + "/v1/")
 	// get tags in parallel
 	for _, repo := range getRepos().Results {
 		remaining = remaining + 1
@@ -143,7 +101,7 @@ func main() {
 	}
 	// get ancestries in parallel
 	for imageId := range tagsByImage {
-		go func(id image) { ancestryCh <- getAncestry(id) }(imageId)
+		go func(id string) { ancestryCh <- getAncestry(id) }(imageId)
 	}
 	// process them as they arrive until all tagged images have been used
 	for len(tagsByImage) != 0 {
