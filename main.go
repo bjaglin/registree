@@ -79,6 +79,7 @@ func printTree(root *imageNode, level int, cumsize int64) {
 func main() {
 	var (
 		remaining   int                                  // how many more responses are we waiting from the goroutine?
+		throttleCh  = make(chan struct{}, 10)            // helper to limit concurrency
 		tagsCh      = make(chan registry.TagMap)         // tags fetcher/consumer channel
 		tagsByImage = make(map[string][]string)          // image ids grouped by tags
 		ancestryCh  = make(chan []string)                // ancestries fetcher/consumer channel
@@ -101,7 +102,11 @@ func main() {
 	// get tags in parallel
 	for _, repo := range getRepos().Results {
 		remaining = remaining + 1
-		go func(name string) { tagsCh <- getTags(name) }(repo.Name)
+		go func(name string) {
+			throttleCh <- struct{}{}
+			tagsCh <- getTags(name)
+			<-throttleCh
+		}(repo.Name)
 	}
 	// group them as they are fetched
 	for remaining != 0 {
@@ -113,7 +118,11 @@ func main() {
 	}
 	// get ancestries in parallel
 	for imageId := range tagsByImage {
-		go func(id string) { ancestryCh <- getAncestry(id) }(imageId)
+		go func(id string) {
+			throttleCh <- struct{}{}
+			ancestryCh <- getAncestry(id)
+			<-throttleCh
+		}(imageId)
 	}
 	// process them as they arrive until all tagged images have been used
 	for len(tagsByImage) != 0 {
@@ -132,7 +141,11 @@ func main() {
 			}
 			// retrieve layer metadata async
 			remaining = remaining + 1
-			go func(id string) { metadataCh <- getMetadata(id) }(id)
+			go func(id string) {
+				throttleCh <- struct{}{}
+				metadataCh <- getMetadata(id)
+				<-throttleCh
+			}(id)
 			// register the node in the tree
 			node := &imageNode{id: id}
 			if tags, ok := tagsByImage[id]; ok {
