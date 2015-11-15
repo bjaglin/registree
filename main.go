@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/CenturyLinkLabs/docker-reg-client/registry"
+	"github.com/docker/docker/pkg/units"
 	"io/ioutil"
 	"log"
 	"net/url"
@@ -17,6 +18,7 @@ var (
 
 type imageNode struct {
 	id       string
+	size     int64
 	tags     []string
 	children []*imageNode
 }
@@ -46,8 +48,15 @@ func getTags(name string) registry.TagMap {
 func getAncestry(id string) []string {
 	log.Printf("Fetching ancestry for %s ...", id)
 	ancestry, _ := client.Image.GetAncestry(id, registry.NilAuth{})
-	log.Printf("%v ancestors fetched for repo %s", len(ancestry), id)
+	log.Printf("%v ancestors fetched for tag %s", len(ancestry), id)
 	return ancestry
+}
+
+func getMetadata(id string) *registry.ImageMetadata {
+	log.Printf("Fetching metadata for %s ...", id)
+	metadata, _ := client.Image.GetMetadata(id, registry.NilAuth{})
+	log.Printf("Metadata fetched for tag %s", id)
+	return metadata
 }
 
 func fqTag(name string, t string) string {
@@ -55,24 +64,27 @@ func fqTag(name string, t string) string {
 	return canonicalName + ":" + t
 }
 
-func printTree(root *imageNode, level int) {
+func printTree(root *imageNode, level int, cumsize int64) {
+	cumsize = cumsize + root.size
 	if len(root.tags) > 0 || len(root.children) > 1 {
-		fmt.Printf("%s %s%v\n", root.id, strings.Repeat("  ", level), root.tags)
+		fmt.Printf("%s %s%v %s\n", root.id, strings.Repeat("  ", level), root.tags, units.HumanSize(float64(cumsize)))
 		level = level + 1
+		cumsize = 0
 	}
 	for _, child := range root.children {
-		printTree(child, level)
+		printTree(child, level, cumsize)
 	}
 }
 
 func main() {
 	var (
-		remaining   int                           // how many more responses are we waiting from the goroutine?
-		tagsCh      = make(chan registry.TagMap)  // tags fetcher/consumer channel
-		tagsByImage = make(map[string][]string)   // image ids grouped by tags
-		ancestryCh  = make(chan []string)         // ancestries fetcher/consumer channel
-		images      = make(map[string]*imageNode) // already processed nodes as we are building up the trees
-		roots       []*imageNode                  // roots as we are building up the threes
+		remaining   int                                  // how many more responses are we waiting from the goroutine?
+		tagsCh      = make(chan registry.TagMap)         // tags fetcher/consumer channel
+		tagsByImage = make(map[string][]string)          // image ids grouped by tags
+		ancestryCh  = make(chan []string)                // ancestries fetcher/consumer channel
+		images      = make(map[string]*imageNode)        // already processed nodes as we are building up the trees
+		metadataCh  = make(chan *registry.ImageMetadata) // metadata fetcher/consumer channel
+		roots       []*imageNode                         // roots as we are building up the threes
 	)
 	if len(registryURL) == 0 {
 		registryURL = os.Getenv("REGISTRY_URL")
@@ -118,6 +130,10 @@ func main() {
 				previousNode = nil
 				break
 			}
+			// retrieve layer metadata async
+			remaining = remaining + 1
+			go func(id string) { metadataCh <- getMetadata(id) }(id)
+			// register the node in the tree
 			node := &imageNode{id: id}
 			if tags, ok := tagsByImage[id]; ok {
 				node.tags = tags
@@ -136,9 +152,15 @@ func main() {
 			roots = append(roots, previousNode)
 		}
 	}
+	// store metadata about all images as they get back
+	for remaining != 0 {
+		metadata := <-metadataCh
+		images[metadata.ID].size = metadata.Size
+		remaining = remaining - 1
+	}
 	// dump all the trees
 	for _, root := range roots {
-		printTree(root, 0)
+		printTree(root, 0, 0)
 	}
 
 }
