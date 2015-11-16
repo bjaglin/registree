@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 )
 
 var (
@@ -78,7 +79,7 @@ func printTree(root *imageNode, level int, cumsize int64) {
 
 func main() {
 	var (
-		remaining   int                                  // how many more responses are we waiting from the goroutine?
+		wg          sync.WaitGroup
 		throttleCh  = make(chan struct{}, 10)            // helper to limit concurrency
 		tagsCh      = make(chan registry.TagMap)         // tags fetcher/consumer channel
 		tagsByImage = make(map[string][]string)          // image ids grouped by tags
@@ -101,22 +102,25 @@ func main() {
 	client.BaseURL, _ = url.Parse(registryURL + "/v1/")
 	// get tags in parallel
 	for _, repo := range getRepos().Results {
-		remaining = remaining + 1
+		wg.Add(1)
 		go func(name string) {
+			defer wg.Done()
 			throttleCh <- struct{}{}
 			tagsCh <- getTags(name)
 			<-throttleCh
 		}(repo.Name)
 	}
-	// group them as they are fetched
-	for remaining != 0 {
-		for tag, id := range <-tagsCh {
-			tags, _ := tagsByImage[id]
-			tagsByImage[id] = append(tags, tag)
+	go func() {
+		wg.Wait()
+		close(tagsCh)
+	}()
+	for tags, ok := <-tagsCh; ok; tags, ok = <-tagsCh {
+		for tag, id := range tags {
+			tagsByImage[id] = append(tagsByImage[id], tag)
 		}
-		remaining = remaining - 1
 	}
 	// get ancestries in parallel
+	log.Printf("Fetching ancestry for %v images...", len(tagsByImage))
 	for imageId := range tagsByImage {
 		go func(id string) {
 			throttleCh <- struct{}{}
@@ -139,13 +143,6 @@ func main() {
 				previousNode = nil
 				break
 			}
-			// retrieve layer metadata async
-			remaining = remaining + 1
-			go func(id string) {
-				throttleCh <- struct{}{}
-				metadataCh <- getMetadata(id)
-				<-throttleCh
-			}(id)
 			// register the node in the tree
 			node := &imageNode{id: id}
 			if tags, ok := tagsByImage[id]; ok {
@@ -165,11 +162,22 @@ func main() {
 			roots = append(roots, previousNode)
 		}
 	}
-	// store metadata about all images as they get back
-	for remaining != 0 {
-		metadata := <-metadataCh
+	// retrieve size of all images
+	for id := range images {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			throttleCh <- struct{}{}
+			metadataCh <- getMetadata(id)
+			<-throttleCh
+		}(id)
+	}
+	go func() {
+		wg.Wait()
+		close(metadataCh)
+	}()
+	for metadata, ok := <-metadataCh; ok; metadata, ok = <-metadataCh {
 		images[metadata.ID].size = metadata.Size
-		remaining = remaining - 1
 	}
 	// dump all the trees
 	for _, root := range roots {
