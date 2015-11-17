@@ -29,15 +29,35 @@ func init() {
 }
 
 func getRepos() *registry.SearchResults {
-	log.Print("Fetching repos...")
-	results, _ := client.Search.Query("", 0, 0)
+	var (
+		results *registry.SearchResults
+		err     error
+	)
+	err = retry(3, func() error {
+		log.Print("Fetching repos...")
+		results, err = client.Search.Query("", 0, 0)
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
 	log.Printf("%v repo(s) fetched", results.NumResults)
 	return results
 }
 
 func getTags(name string) registry.TagMap {
-	log.Printf("Fetching tags for %s ...", name)
-	tags, _ := client.Repository.ListTags(name, registry.NilAuth{})
+	var (
+		tags registry.TagMap
+		err  error
+	)
+	err = retry(3, func() error {
+		log.Printf("Fetching tags for %s ...", name)
+		tags, err = client.Repository.ListTags(name, registry.NilAuth{})
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
 	log.Printf("%v tags fetched for repo %s", len(tags), name)
 	fqTags := make(registry.TagMap)
 	for tag, id := range tags {
@@ -47,17 +67,50 @@ func getTags(name string) registry.TagMap {
 }
 
 func getAncestry(id string) []string {
-	log.Printf("Fetching ancestry for %s ...", id)
-	ancestry, _ := client.Image.GetAncestry(id, registry.NilAuth{})
+	var (
+		ancestry []string
+		err  error
+	)
+	err = retry(3, func() error {
+		log.Printf("Fetching ancestry for %s ...", id)
+		ancestry, err = client.Image.GetAncestry(id, registry.NilAuth{})
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
 	log.Printf("%v ancestors fetched for tag %s", len(ancestry), id)
 	return ancestry
 }
 
 func getMetadata(id string) *registry.ImageMetadata {
-	log.Printf("Fetching metadata for %s ...", id)
-	metadata, _ := client.Image.GetMetadata(id, registry.NilAuth{})
+	var (
+		metadata *registry.ImageMetadata
+		err  error
+	)
+	err = retry(3, func() error {
+		log.Printf("Fetching metadata for %s ...", id)
+		metadata, err = client.Image.GetMetadata(id, registry.NilAuth{})
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
 	log.Printf("Metadata fetched for tag %s", id)
 	return metadata
+}
+
+func retry(max int, fn func() error) error {
+	var err error
+	attempt := 1
+	for {
+		err = fn()
+		attempt++
+		if err == nil || attempt > max {
+			break
+		}
+	}
+	return err
 }
 
 func fqTag(name string, t string) string {
