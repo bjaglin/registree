@@ -141,6 +141,11 @@ func main() {
 		metadataCh  = make(chan *registry.ImageMetadata) // metadata fetcher/consumer channel
 		roots       []*imageNode                         // roots as we are building up the threes
 	)
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintln(os.Stderr, "FATAL ERROR:", r)
+		}
+	}()
 	if len(registryURL) == 0 {
 		registryURL = os.Getenv("REGISTRY_URL")
 	}
