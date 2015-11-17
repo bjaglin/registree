@@ -69,7 +69,7 @@ func getTags(name string) registry.TagMap {
 func getAncestry(id string) []string {
 	var (
 		ancestry []string
-		err  error
+		err      error
 	)
 	err = retry(3, func() error {
 		log.Printf("Fetching ancestry for %s ...", id)
@@ -86,7 +86,7 @@ func getAncestry(id string) []string {
 func getMetadata(id string) *registry.ImageMetadata {
 	var (
 		metadata *registry.ImageMetadata
-		err  error
+		err      error
 	)
 	err = retry(3, func() error {
 		log.Printf("Fetching metadata for %s ...", id)
@@ -118,47 +118,23 @@ func fqTag(name string, t string) string {
 	return canonicalName + ":" + t
 }
 
-func printTree(root *imageNode, level int, cumsize int64) {
-	cumsize = cumsize + root.size
-	if len(root.tags) > 0 || len(root.children) > 1 {
-		fmt.Printf("%s %s%v %s\n", root.id, strings.Repeat("  ", level), root.tags, units.HumanSize(float64(cumsize)))
-		level = level + 1
-		cumsize = 0
-	}
-	for _, child := range root.children {
-		printTree(child, level, cumsize)
-	}
-}
-
-func main() {
-	var (
-		wg          sync.WaitGroup
-		throttleCh  = make(chan struct{}, 10)            // helper to limit concurrency
-		tagsCh      = make(chan registry.TagMap)         // tags fetcher/consumer channel
-		tagsByImage = make(map[string][]string)          // image ids grouped by tags
-		ancestryCh  = make(chan []string)                // ancestries fetcher/consumer channel
-		images      = make(map[string]*imageNode)        // already processed nodes as we are building up the trees
-		metadataCh  = make(chan *registry.ImageMetadata) // metadata fetcher/consumer channel
-		roots       []*imageNode                         // roots as we are building up the threes
-	)
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintln(os.Stderr, "FATAL ERROR:", r)
-		}
-	}()
+func setupRegistryURL() {
 	if len(registryURL) == 0 {
 		registryURL = os.Getenv("REGISTRY_URL")
 	}
 	if len(registryURL) == 0 {
 		log.Fatal("No registry URL provided, use the environment variable REGISTRY_URL to set it")
 	}
-	if len(os.Getenv("REGISTREE_DEBUG")) > 0 {
-		log.SetOutput(os.Stderr)
-	} else {
-		log.SetOutput(ioutil.Discard)
-	}
 	client.BaseURL, _ = url.Parse(registryURL + "/v1/")
-	// get tags in parallel
+}
+
+func getTagsByImage() map[string][]string {
+	var (
+		wg          sync.WaitGroup
+		throttleCh  = make(chan struct{}, 10)    // helper to limit concurrency
+		tagsCh      = make(chan registry.TagMap) // tags fetcher/consumer channel
+		tagsByImage = make(map[string][]string)  // image ids grouped by tags
+	)
 	for _, repo := range getRepos().Results {
 		wg.Add(1)
 		go func(name string) {
@@ -177,6 +153,18 @@ func main() {
 			tagsByImage[id] = append(tagsByImage[id], tag)
 		}
 	}
+	return tagsByImage
+}
+
+func getImagesAsTree(tagsByImage map[string][]string) (roots []*imageNode) {
+	var (
+		wg         sync.WaitGroup
+		throttleCh = make(chan struct{}, 10)            // helper to limit concurrency
+		ancestryCh = make(chan []string)                // ancestries fetcher/consumer channel
+		images     = make(map[string]*imageNode)        // already processed nodes as we are building up the trees
+		metadataCh = make(chan *registry.ImageMetadata) // metadata fetcher/consumer channel
+	)
+
 	// get ancestries in parallel
 	log.Printf("Fetching ancestry for %v images...", len(tagsByImage))
 	for imageId := range tagsByImage {
@@ -220,6 +208,7 @@ func main() {
 			roots = append(roots, previousNode)
 		}
 	}
+
 	// retrieve size of all images
 	for id := range images {
 		wg.Add(1)
@@ -237,7 +226,39 @@ func main() {
 	for metadata, ok := <-metadataCh; ok; metadata, ok = <-metadataCh {
 		images[metadata.ID].size = metadata.Size
 	}
-	// dump all the trees
+
+	return roots
+}
+
+func printTree(root *imageNode, level int, cumsize int64) {
+	cumsize = cumsize + root.size
+	if len(root.tags) > 0 || len(root.children) > 1 {
+		fmt.Printf("%s %s%v %s\n", root.id, strings.Repeat("  ", level), root.tags, units.HumanSize(float64(cumsize)))
+		level = level + 1
+		cumsize = 0
+	}
+	for _, child := range root.children {
+		printTree(child, level, cumsize)
+	}
+}
+
+func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintln(os.Stderr, "FATAL ERROR:", r)
+		}
+	}()
+
+	if len(os.Getenv("REGISTREE_DEBUG")) > 0 {
+		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(ioutil.Discard)
+	}
+
+	setupRegistryURL()
+
+	tagsByImage := getTagsByImage()
+	roots := getImagesAsTree(tagsByImage)
 	for _, root := range roots {
 		printTree(root, 0, 0)
 	}
