@@ -17,11 +17,11 @@ var (
 	registryURL string
 )
 
-type imageNode struct {
+type Layer struct {
 	id       string
 	size     int64
 	tags     []string
-	children []*imageNode
+	children []*Layer
 }
 
 func init() {
@@ -156,12 +156,12 @@ func getTagsByImage() map[string][]string {
 	return tagsByImage
 }
 
-func getImagesAsTree(tagsByImage map[string][]string) (roots []*imageNode) {
+func getImagesAsTree(tagsByImage map[string][]string) (roots []*Layer) {
 	var (
 		wg         sync.WaitGroup
 		throttleCh = make(chan struct{}, 10)            // helper to limit concurrency
 		ancestryCh = make(chan []string)                // ancestries fetcher/consumer channel
-		images     = make(map[string]*imageNode)        // already processed nodes as we are building up the trees
+		images     = make(map[string]*Layer)        // already processed nodes as we are building up the trees
 		metadataCh = make(chan *registry.ImageMetadata) // metadata fetcher/consumer channel
 	)
 
@@ -178,34 +178,34 @@ func getImagesAsTree(tagsByImage map[string][]string) (roots []*imageNode) {
 	for len(tagsByImage) != 0 {
 		var (
 			ancestry     = <-ancestryCh
-			previousNode *imageNode
+			previousLayer *Layer
 		)
 		for _, id := range ancestry {
-			if node, ok := images[id]; ok {
+			if layer, ok := images[id]; ok {
 				// we already went up the hierarchy from there, just append a new child
-				if previousNode != nil {
-					node.children = append(node.children, previousNode)
+				if previousLayer != nil {
+					layer.children = append(layer.children, previousLayer)
 				}
-				previousNode = nil
+				previousLayer = nil
 				break
 			}
 			// register the node in the tree
-			node := &imageNode{id: id}
+			layer := &Layer{id: id}
 			if tags, ok := tagsByImage[id]; ok {
-				node.tags = tags
+				layer.tags = tags
 				// don't wait for that image's ancestry, we already are going up that one
 				delete(tagsByImage, id)
 			}
-			if previousNode != nil {
+			if previousLayer != nil {
 				// this is not a leaf in the tree, so attach its child
-				node.children = []*imageNode{previousNode}
+				layer.children = []*Layer{previousLayer}
 			}
-			images[id] = node
-			previousNode = node
+			images[id] = layer
+			previousLayer = layer
 		}
-		if previousNode != nil {
+		if previousLayer != nil {
 			// the previous loop didn't break out, so the last node considered is a root
-			roots = append(roots, previousNode)
+			roots = append(roots, previousLayer)
 		}
 	}
 
@@ -230,14 +230,14 @@ func getImagesAsTree(tagsByImage map[string][]string) (roots []*imageNode) {
 	return roots
 }
 
-func printTree(root *imageNode, level int, cumsize int64) {
-	cumsize = cumsize + root.size
-	if len(root.tags) > 0 || len(root.children) > 1 {
-		fmt.Printf("%s %s%v %s\n", root.id, strings.Repeat("  ", level), root.tags, units.HumanSize(float64(cumsize)))
+func printTree(layer *Layer, level int, cumsize int64) {
+	cumsize = cumsize + layer.size
+	if len(layer.tags) > 0 || len(layer.children) > 1 {
+		fmt.Printf("%s %s%v %s\n", layer.id, strings.Repeat("  ", level), layer.tags, units.HumanSize(float64(cumsize)))
 		level = level + 1
 		cumsize = 0
 	}
-	for _, child := range root.children {
+	for _, child := range layer.children {
 		printTree(child, level, cumsize)
 	}
 }
