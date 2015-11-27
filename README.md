@@ -1,7 +1,7 @@
 registree
 =========
 
-A simple CLI tool to display relations between images stored in a private Docker registry as a set of trees.
+A simple (and slow!) CLI tool to display relations between images stored in a private Docker registry as a set of trees.
 
 [![Build Status](https://travis-ci.org/bjaglin/registree.svg?branch=master)](https://travis-ci.org/bjaglin/registree)
 
@@ -15,20 +15,43 @@ Make sure you have the latest version via:
 
     docker pull bjaglin/registree
 
-Note that the tool is only compatible with the Registry API v1.
+Note that the tool is only compatible with the Registry API v1. Debug logs can be enabled by setting the environment variable `REGISTREE_DEBUG=true`.
 
-## Output
+## Example
 
-Each line represents a layer: the fixed-length prefix is the layer id, followed by some spacing allowing to distinguish siblings from ancestors (roots are only only separated by a single space), and the potential tag(s) of that layer. Only layers that have either a tag or more than one child are listed, so that the trees appear less deep than they actually are, while still displaying relations between them. Note that base layers such as OS images that are available from the central registry will not show up in the output unless they have been explicitly tagged within the target registry.
+    f9d45d2aff66074564f921cf56084d0b1de379f894aaecbfd57a3c8030e5fa39 [] 221.4 MB
+    1c966893d2a8e95d3b61e5f31680f73aa7752cda93ab6791473dc267bd64daea   [targeting:production_201506030921 targeting:production_2015007031600] 61.56 MB
+    6b533c0982305dcee7f1348b0afe969b7013fee82436146a7ca4d7d0b1349e1e   [front-tools:2.1.12 front-tools:master npm-builder:2.1.12] 467 MB
+    ce7b1346ab1a3d1cfc66e2cb15594c740fc385f0c5457761e3658162d65142cb   [] 255.8 MB
+    2ea2a2f2ad2f0b4570d2557c506e8386deb3338d80ef4621b36dafcd54030708     [ssp:improvement_bid-request-dsl-call] 103.7 MB
+    f6848dac6979b1682bf797f842450c1bc2912b24651bae4497d12f2e112f3623     [algo:improvement_bid-request-dsl-call] 63.42 MB
+    ce98a4f8e6b59740d6bc82af2205c21435993135c5b5238c848177cc77ede6d8   [] 0 B
+    f91becfbabfc5fc71f4edf928b048536ccdfc258adb0c256ef9affaa69f5d1a8     [cassandra:1.2.18] 91.05 MB
+    46f23cc11fedc0d1334ac2ab91bb69ee3b2054736b77700a47cd9c4de992707d       [cassandra-migrations:feature_fixtures] 67.48 MB
+    40d90bff69b052395e2d8be8ef6aa9529601150f3a4ce6c6169a6ae4276359e0     [tracking:refactor_trackservice] 83.18 MB
 
-From the following example, we can tell for instance that `oraclejre:1.8.0_11` is an ancestor of `selenium:2.42.2` and that no layer between them was tagged, that `0c9f511ac247` was tagged twice, and that `sbtdist-runner:java1.8.0_11` and `sbtnative-runner:java1.8.0_11` share a common ancestor layer which is not tagged in that registry.
+Indentation following the raw layer ids allows you to visualize the hierarchy between images (transformation to a DOT file is not implemented):
 
-    05489018501eba827a37365bdd74c687b6760846f51a5943f30e5cd4e0b6b6f2 [oraclejre:1.8.0_11]
-    bafa304de54d84d0feb0d44401d6fb14cf7b710a2068b697ce9dd5b9e520f90f   [selenium:2.42.2]
-    148a58f58eee25156c51562bf139f712dceee2cd2b7458e44249fc915f9c9bf4     [selenium-hub:2.42.2]
-    68227fc7161bc2db50223e3d8f0360239dff321d59782d3516df2c2a7cdccbbc   [selenium:2.44.0 selenium:master]
-    0c9f511ac247d1f42ee4d561179f7ddbe332aee4b921ec769b8f4b2094b18c24     [selenium-node-chrome:2.44.0_chrome39.0 selenium-node-chrome:master]
-    57b4f9a70dd5e53fa4870b9e1442d07ae569de45d5eee2d9e5ea65d0327e5286     [selenium-hub:2.44.0 selenium-hub:master]
-    cba62eeae5ca6e20aaa87ea3c75dc947e472b3fdc18d6db262d5037c86891d09   []
-    a9335cff89e14ee51ba5dafddf33d117a614d2d9092f71c2bf7e7e674c39e855     [sbtdist-runner:java1.8.0_11]
-    1d350bd93ba5a1035b35ddc672bd8386b9e9b2b8a1a4cc16205c6e5200515c3e     [sbtnative-runner:java1.8.0_11]
+![Tree view](http://g.gravizo.com/g?
+  digraph G {
+    "2ea2a2f"[label="2ea2a2f\\nssp:impro..."];
+    "f6848da"[label="f6848da\\nalgo:impro..."];
+    "f91becf"[label="f91becf\\ncassandra:1.2.18"];
+    "46f23cc"[label="46f23cc\\ncassandra-migrations:featur..."];
+    "40d90bf"[label="40d90bf\\ntracking:refact..."];
+    "1c96689"[label="1c96689\\ntargeting:prod...\\ntargeting:prod..."];
+    "6b533c0"[label="6b533c0\\nfront-tools:2.1.12\\nfront-tools:master\\nnpm-builder:2.1.12"];
+    "?" -> "f9d45d2" [label="221.4 MB"];
+    "f9d45d2" -> "ce7b134" [label="255.8 MB"];
+    "ce7b134" -> "2ea2a2f"[label="103.7 MB"];
+    "ce7b134" -> "f6848da"[label="62.42 MB"];
+    "f9d45d2" -> "ce98a4f" [label="0 B"];
+    "ce98a4f" -> "f91becf" [label="91.05 MB"];
+    "f91becf" -> "46f23cc" [label="67.48 MB"];
+    "ce98a4f" -> "40d90bf" [label="83.18 MB"];
+    "f9d45d2" -> "1c96689" [label="61.56 MB"];
+    "f9d45d2" -> "6b533c0" [label="467 MB"];
+  }
+)
+	
+In this example, all images currently tagged in the repository inherit from the same base image (`f9d45d2`), which weights 221.4 MB (that includes the weigth of its potential ancestors not listed here), but does not have a tag in that repository (probably a base OS image coming from the central hub, but which was not pushed as such). `ssp:improvement_bid-request-dsl-call` and `algo:improvement_bid-request-dsl-call` closest common ancestor is `ce7b134`, and the respective weigths they bring-in on top of that image are 103.7 MB and 63.42 MB. `targeting:production_201506030921` and `targeting:production_2015007031600` are actually the same image, which has only `f9d45d2` (and its potential ancestors ommited here) in common with all other tagged images in the repository.
